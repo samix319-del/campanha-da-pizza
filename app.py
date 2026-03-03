@@ -28,11 +28,9 @@ st.markdown("""
 DB_NAME = "desbravadores.db"
 
 def init_db():
-    """Cria as tabelas se não existirem."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # Tabela Campori
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS campori (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,11 +40,14 @@ def init_db():
             p2 INTEGER DEFAULT 0,
             p3 INTEGER DEFAULT 0,
             p4 INTEGER DEFAULT 0,
+            valor_p1 REAL DEFAULT 97.00,
+            valor_p2 REAL DEFAULT 97.00,
+            valor_p3 REAL DEFAULT 97.00,
+            valor_p4 REAL DEFAULT 97.00,
             data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
-    # Tabela Vendas Pizza
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS vendas_pizza (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,40 +76,20 @@ def load_pizza_data():
     conn.close()
     return df
 
-def save_campori_df(df_original, df_editado):
-    """Salva as alterações do DataFrame editado."""
+def update_campori_payment(id_registro, p1, p2, p3, p4, valor_p1, valor_p2, valor_p3, valor_p4):
+    """Atualiza pagamentos de forma direta"""
     conn = get_connection()
     cursor = conn.cursor()
-    
-    try:
-        for index, row in df_editado.iterrows():
-            # Mapear colunas exibidas para colunas do banco
-            p1 = 1 if row.get('P1', 0) else 0
-            p2 = 1 if row.get('P2', 0) else 0
-            p3 = 1 if row.get('P3', 0) else 0
-            p4 = 1 if row.get('P4', 0) else 0
-            
-            if pd.isna(row['id']) or row['id'] == 0:
-                cursor.execute('''
-                    INSERT INTO campori (nome_desbravador, nome_responsavel, p1, p2, p3, p4)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (row['nome_desbravador'], row['nome_responsavel'], p1, p2, p3, p4))
-            else:
-                cursor.execute('''
-                    UPDATE campori 
-                    SET nome_desbravador=?, nome_responsavel=?, p1=?, p2=?, p3=?, p4=?
-                    WHERE id=?
-                ''', (row['nome_desbravador'], row['nome_responsavel'], p1, p2, p3, p4, int(row['id'])))
-        
-        conn.commit()
-        st.success("✅ Dados salvos com sucesso!")
-    except Exception as e:
-        st.error(f"❌ Erro ao salvar: {e}")
-    finally:
-        conn.close()
+    cursor.execute('''
+        UPDATE campori 
+        SET p1=?, p2=?, p3=?, p4=?, 
+            valor_p1=?, valor_p2=?, valor_p3=?, valor_p4=?
+        WHERE id=?
+    ''', (p1, p2, p3, p4, valor_p1, valor_p2, valor_p3, valor_p4, id_registro))
+    conn.commit()
+    conn.close()
 
 def save_pizza_df(df):
-    """Salva as alterações da pizza."""
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -156,30 +137,33 @@ def main():
         df_pizza = load_pizza_data()
         
         total_parcelas_pagas = 0
-        if not df_campori.empty:
-            cols_pagas = ['p1', 'p2', 'p3', 'p4']
-            total_parcelas_pagas = df_campori[cols_pagas].sum().sum()
+        total_arrecadado_campori = 0.0
         
-        valor_campori = total_parcelas_pagas * 97.00
+        if not df_campori.empty:
+            for _, row in df_campori.iterrows():
+                total_parcelas_pagas += row['p1'] + row['p2'] + row['p3'] + row['p4']
+                total_arrecadado_campori += (row['p1'] * row['valor_p1'] if row['p1'] else 0)
+                total_arrecadado_campori += (row['p2'] * row['valor_p2'] if row['p2'] else 0)
+                total_arrecadado_campori += (row['p3'] * row['valor_p3'] if row['p3'] else 0)
+                total_arrecadado_campori += (row['p4'] * row['valor_p4'] if row['p4'] else 0)
         
         total_arrecadado_pizza = 0.0
         if not df_pizza.empty:
             df_pizza['total_linha'] = df_pizza['quantidade'] * df_pizza['valor_unitario']
             total_arrecadado_pizza = df_pizza['total_linha'].sum()
             
-        total_geral = valor_campori + total_arrecadado_pizza
+        total_geral = total_arrecadado_campori + total_arrecadado_pizza
         
         col1, col2, col3 = st.columns(3)
-        col1.metric("Arrecadado Campori", f"R$ {valor_campori:,.2f}", delta=f"{total_parcelas_pagas} parcelas pagas")
+        col1.metric("Arrecadado Campori", f"R$ {total_arrecadado_campori:,.2f}", delta=f"{total_parcelas_pagas} parcelas pagas")
         col2.metric("Arrecadado Pizzas", f"R$ {total_arrecadado_pizza:,.2f}", delta="Vendas Ativas")
         col3.metric("TOTAL GERAL CAIXA", f"R$ {total_geral:,.2f}", delta="Saldo Atual")
         
-        st.info("💡 Dica: Use o menu lateral para editar registros ou lançar novos pagamentos/vendas.")
+        st.info("💡 Dica: Use o menu lateral para editar registros.")
 
     # --- ABA 1: CAMPORI ---
     elif menu == "🏕️ Controle Campori":
         st.title("🏕️ Controle de Pagamento - Campori")
-        st.markdown("**Valor da Parcela:** R$ 97,00 | **Total por Desbravador:** R$ 388,00")
         
         # Formulário de Novo Registro
         with st.expander("➕ Cadastrar Novo Desbravador"):
@@ -193,7 +177,11 @@ def main():
                     if nome_desb and nome_resp:
                         conn = get_connection()
                         cursor = conn.cursor()
-                        cursor.execute("INSERT INTO campori (nome_desbravador, nome_responsavel) VALUES (?, ?)", (nome_desb, nome_resp))
+                        cursor.execute('''
+                            INSERT INTO campori (nome_desbravador, nome_responsavel, 
+                                valor_p1, valor_p2, valor_p3, valor_p4) 
+                            VALUES (?, ?, 97.00, 97.00, 97.00, 97.00)
+                        ''', (nome_desb, nome_resp))
                         conn.commit()
                         conn.close()
                         st.success("Cadastrado com sucesso!")
@@ -203,61 +191,68 @@ def main():
 
         st.divider()
         
-        # Carregar e Exibir Dados
         df = load_campori_data()
         
         if not df.empty:
-            # Preparar DataFrame para Edição - MANTER NOMES ORIGINAIS
-            df_edit = df.copy()
+            st.subheader("📋 Registro de Pagamentos")
             
-            # Configurar o editor de dados com colunas originais
-            edited_df = st.data_editor(
-                df_edit,
-                column_config={
-                    "id": st.column_config.NumberColumn("ID", disabled=True),
-                    "nome_desbravador": st.column_config.TextColumn("Desbravador"),
-                    "nome_responsavel": st.column_config.TextColumn("Responsável"),
-                    "p1": st.column_config.CheckboxColumn("P1 (R$97)", help="Parcela 1"),
-                    "p2": st.column_config.CheckboxColumn("P2 (R$97)", help="Parcela 2"),
-                    "p3": st.column_config.CheckboxColumn("P3 (R$97)", help="Parcela 3"),
-                    "p4": st.column_config.CheckboxColumn("P4 (R$97)", help="Parcela 4"),
-                    "data_cadastro": st.column_config.DatetimeColumn("Data", disabled=True),
-                },
-                hide_index=True,
-                use_container_width=True,
-                num_rows="dynamic"
-            )
+            # Criar colunas para cada registro
+            for idx, row in df.iterrows():
+                with st.expander(f"👤 {row['nome_desbravador']} - {row['nome_responsavel']} (ID: {row['id']})"):
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    # Parcela 1
+                    with col1:
+                        st.markdown("**Parcela 1**")
+                        p1 = st.checkbox("Paga", value=bool(row['p1']), key=f"p1_{row['id']}")
+                        valor_p1 = st.number_input("Valor R$", min_value=0.0, value=float(row['valor_p1']), 
+                                                   key=f"vp1_{row['id']}", step=1.0)
+                    
+                    # Parcela 2
+                    with col2:
+                        st.markdown("**Parcela 2**")
+                        p2 = st.checkbox("Paga", value=bool(row['p2']), key=f"p2_{row['id']}")
+                        valor_p2 = st.number_input("Valor R$", min_value=0.0, value=float(row['valor_p2']), 
+                                                   key=f"vp2_{row['id']}", step=1.0)
+                    
+                    # Parcela 3
+                    with col3:
+                        st.markdown("**Parcela 3**")
+                        p3 = st.checkbox("Paga", value=bool(row['p3']), key=f"p3_{row['id']}")
+                        valor_p3 = st.number_input("Valor R$", min_value=0.0, value=float(row['valor_p3']), 
+                                                   key=f"vp3_{row['id']}", step=1.0)
+                    
+                    # Parcela 4
+                    with col4:
+                        st.markdown("**Parcela 4**")
+                        p4 = st.checkbox("Paga", value=bool(row['p4']), key=f"p4_{row['id']}")
+                        valor_p4 = st.number_input("Valor R$", min_value=0.0, value=float(row['valor_p4']), 
+                                                   key=f"vp4_{row['id']}", step=1.0)
+                    
+                    if st.button(f"💾 Salvar Pagamentos - {row['nome_desbravador']}", key=f"save_{row['id']}"):
+                        update_campori_payment(row['id'], int(p1), int(p2), int(p3), int(p4),
+                                             valor_p1, valor_p2, valor_p3, valor_p4)
+                        st.success(f"✅ Pagamentos de {row['nome_desbravador']} salvos!")
+                        st.rerun()
+                    
+                    # Calcular total pago
+                    total_pago = 0
+                    if p1: total_pago += valor_p1
+                    if p2: total_pago += valor_p2
+                    if p3: total_pago += valor_p3
+                    if p4: total_pago += valor_p4
+                    
+                    st.info(f"💰 Total pago: R$ {total_pago:.2f} | Falta: R$ {(388.00 - total_pago):.2f}")
             
-            # Botão de Salvar Alterações
-            if st.button("💾 Salvar Alterações dos Pagamentos"):
-                save_campori_df(df, edited_df)
-                st.rerun()
-                
             # Área de Exclusão
             st.divider()
             st.subheader("🗑️ Excluir Registro")
-            id_excluir = st.number_input("Digite o ID do registro para excluir permanentemente", min_value=1, step=1)
+            id_excluir = st.number_input("Digite o ID do registro para excluir", min_value=1, step=1)
             if st.button("Excluir Registro"):
                 delete_record('campori', id_excluir)
                 st.warning(f"Registro ID {id_excluir} excluído.")
                 st.rerun()
 
-            # Cálculo de Saldo por Desbravador
-            st.divider()
-            st.subheader("💰 Status de Saldo")
-            df_calc = df.copy()
-            df_calc['total_pago'] = (df_calc['p1'] + df_calc['p2'] + df_calc['p3'] + df_calc['p4']) * 97.00
-            df_calc['faltam'] = 388.00 - df_calc['total_pago']
-            
-            display_df = df_calc[['nome_desbravador', 'total_pago', 'faltam']]
-            display_df = display_df.rename(columns={'total_pago': 'Já Pago', 'faltam': 'Falta Pagar'})
-            
-            st.dataframe(
-                display_df.style.format({'Já Pago': 'R$ {:,.2f}', 'Falta Pagar': 'R$ {:,.2f}'}),
-                use_container_width=True,
-                hide_index=True
-            )
-            
             # Exportação
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Baixar Relatório Campori (CSV)", csv, "relatorio_campori.csv", "text/csv")
@@ -281,8 +276,10 @@ def main():
                     if nome_desb:
                         conn = get_connection()
                         cursor = conn.cursor()
-                        cursor.execute("INSERT INTO vendas_pizza (nome_desbravador, quantidade, valor_unitario) VALUES (?, ?, ?)", 
-                                       (nome_desb, int(qtd), float(valor)))
+                        cursor.execute('''
+                            INSERT INTO vendas_pizza (nome_desbravador, quantidade, valor_unitario) 
+                            VALUES (?, ?, ?)
+                        ''', (nome_desb, int(qtd), float(valor)))
                         conn.commit()
                         conn.close()
                         st.success("Venda registrada!")
@@ -299,7 +296,6 @@ def main():
             df_ranking = df.sort_values(by='Total Arrecadado', ascending=False)
             
             st.subheader("📝 Editar Quantidades e Valores")
-            st.caption("Edite diretamente na tabela abaixo para atualizar vendas.")
             
             edited_df = st.data_editor(
                 df_ranking,
