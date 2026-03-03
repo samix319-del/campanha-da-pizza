@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS Personalizado para cores e layout
+# CSS Personalizado
 st.markdown("""
     <style>
     .main { background-color: #f5f5f5; }
@@ -23,7 +23,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# GERENCIAMENTO DE BANCO DE DADOS (SQLite)
+# GERENCIAMENTO DE BANCO DE DADOS
 # ==============================================================================
 DB_NAME = "desbravadores.db"
 
@@ -75,35 +75,40 @@ def load_pizza_data():
     conn.close()
     return df
 
-def save_campori_df(df):
-    """Sincroniza o DataFrame editado de volta para o SQLite."""
+def save_campori_df(df_original, df_editado):
+    """Salva as alterações do DataFrame editado."""
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Iterar sobre as linhas para atualizar
-    for index, row in df.iterrows():
-        # Verifica se é uma nova linha (ID NaN ou 0) ou atualização
-        if pd.isna(row['id']) or row['id'] == 0:
-            cursor.execute('''
-                INSERT INTO campori (nome_desbravador, nome_responsavel, p1, p2, p3, p4)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (row['nome_desbravador'], row['nome_responsavel'], 
-                  int(row['p1']), int(row['p2']), int(row['p3']), int(row['p4'])))
-        else:
-            cursor.execute('''
-                UPDATE campori 
-                SET nome_desbravador=?, nome_responsavel=?, p1=?, p2=?, p3=?, p4=?
-                WHERE id=?
-            ''', (row['nome_desbravador'], row['nome_responsavel'],
-                  int(row['p1']), int(row['p2']), int(row['p3']), int(row['p4']),
-                  int(row['id'])))
-    
-    conn.commit()
-    conn.close()
-    st.success("Dados de Campori salvos com sucesso!")
+    try:
+        for index, row in df_editado.iterrows():
+            # Mapear colunas exibidas para colunas do banco
+            p1 = 1 if row.get('P1', 0) else 0
+            p2 = 1 if row.get('P2', 0) else 0
+            p3 = 1 if row.get('P3', 0) else 0
+            p4 = 1 if row.get('P4', 0) else 0
+            
+            if pd.isna(row['id']) or row['id'] == 0:
+                cursor.execute('''
+                    INSERT INTO campori (nome_desbravador, nome_responsavel, p1, p2, p3, p4)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (row['nome_desbravador'], row['nome_responsavel'], p1, p2, p3, p4))
+            else:
+                cursor.execute('''
+                    UPDATE campori 
+                    SET nome_desbravador=?, nome_responsavel=?, p1=?, p2=?, p3=?, p4=?
+                    WHERE id=?
+                ''', (row['nome_desbravador'], row['nome_responsavel'], p1, p2, p3, p4, int(row['id'])))
+        
+        conn.commit()
+        st.success("✅ Dados salvos com sucesso!")
+    except Exception as e:
+        st.error(f"❌ Erro ao salvar: {e}")
+    finally:
+        conn.close()
 
 def save_pizza_df(df):
-    """Sincroniza o DataFrame editado de volta para o SQLite."""
+    """Salva as alterações da pizza."""
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -122,7 +127,7 @@ def save_pizza_df(df):
     
     conn.commit()
     conn.close()
-    st.success("Dados de Vendas atualizados!")
+    st.success("✅ Dados de vendas atualizados!")
 
 def delete_record(table, record_id):
     conn = get_connection()
@@ -136,7 +141,7 @@ def delete_record(table, record_id):
 # ==============================================================================
 
 def main():
-    init_db() # Garante que o DB existe ao iniciar
+    init_db()
     
     st.sidebar.title("🔥 Clube de Desbravadores")
     st.sidebar.markdown("Sistema de Gestão Local")
@@ -150,7 +155,6 @@ def main():
         df_campori = load_campori_data()
         df_pizza = load_pizza_data()
         
-        # Cálculos Campori
         total_parcelas_pagas = 0
         if not df_campori.empty:
             cols_pagas = ['p1', 'p2', 'p3', 'p4']
@@ -158,7 +162,6 @@ def main():
         
         valor_campori = total_parcelas_pagas * 97.00
         
-        # Cálculos Pizza
         total_arrecadado_pizza = 0.0
         if not df_pizza.empty:
             df_pizza['total_linha'] = df_pizza['quantidade'] * df_pizza['valor_unitario']
@@ -204,36 +207,30 @@ def main():
         df = load_campori_data()
         
         if not df.empty:
-            # Preparar DataFrame para Edição
-            # Renomear colunas para exibição amigável
+            # Preparar DataFrame para Edição - MANTER NOMES ORIGINAIS
             df_edit = df.copy()
-            df_edit = df_edit.rename(columns={
-                'p1': 'Parcela 1 (R$97)', 
-                'p2': 'Parcela 2 (R$97)', 
-                'p3': 'Parcela 3 (R$97)', 
-                'p4': 'Parcela 4 (R$97)'
-            })
             
-            # Configurar o editor de dados
+            # Configurar o editor de dados com colunas originais
             edited_df = st.data_editor(
                 df_edit,
                 column_config={
                     "id": st.column_config.NumberColumn("ID", disabled=True),
                     "nome_desbravador": st.column_config.TextColumn("Desbravador"),
                     "nome_responsavel": st.column_config.TextColumn("Responsável"),
-                    "Parcela 1 (R$97)": st.column_config.CheckboxColumn("P1", help="Marcar como pago"),
-                    "Parcela 2 (R$97)": st.column_config.CheckboxColumn("P2", help="Marcar como pago"),
-                    "Parcela 3 (R$97)": st.column_config.CheckboxColumn("P3", help="Marcar como pago"),
-                    "Parcela 4 (R$97)": st.column_config.CheckboxColumn("P4", help="Marcar como pago"),
+                    "p1": st.column_config.CheckboxColumn("P1 (R$97)", help="Parcela 1"),
+                    "p2": st.column_config.CheckboxColumn("P2 (R$97)", help="Parcela 2"),
+                    "p3": st.column_config.CheckboxColumn("P3 (R$97)", help="Parcela 3"),
+                    "p4": st.column_config.CheckboxColumn("P4 (R$97)", help="Parcela 4"),
+                    "data_cadastro": st.column_config.DatetimeColumn("Data", disabled=True),
                 },
                 hide_index=True,
                 use_container_width=True,
-                num_rows="dynamic" # Permite adicionar linhas direto na tabela se quiser
+                num_rows="dynamic"
             )
             
-            # Botão de Salvar Alterações da Tabela
+            # Botão de Salvar Alterações
             if st.button("💾 Salvar Alterações dos Pagamentos"):
-                save_campori_df(edited_df)
+                save_campori_df(df, edited_df)
                 st.rerun()
                 
             # Área de Exclusão
@@ -245,7 +242,7 @@ def main():
                 st.warning(f"Registro ID {id_excluir} excluído.")
                 st.rerun()
 
-            # Cálculo de Saldo por Desbravador (Visualização apenas)
+            # Cálculo de Saldo por Desbravador
             st.divider()
             st.subheader("💰 Status de Saldo")
             df_calc = df.copy()
@@ -255,7 +252,6 @@ def main():
             display_df = df_calc[['nome_desbravador', 'total_pago', 'faltam']]
             display_df = display_df.rename(columns={'total_pago': 'Já Pago', 'faltam': 'Falta Pagar'})
             
-            # Formatar moeda para exibição
             st.dataframe(
                 display_df.style.format({'Já Pago': 'R$ {:,.2f}', 'Falta Pagar': 'R$ {:,.2f}'}),
                 use_container_width=True,
@@ -273,7 +269,6 @@ def main():
     elif menu == "🍕 Ranking de Pizzas":
         st.title("🍕 Ranking de Vendas de Pizza")
         
-        # Formulário de Nova Venda/Desbravador
         with st.expander("➕ Cadastrar Venda / Desbravador"):
             with st.form("form_pizza"):
                 c1, c2, c3 = st.columns(3)
@@ -300,13 +295,9 @@ def main():
         df = load_pizza_data()
         
         if not df.empty:
-            # Cálculo Automático do Total
             df['Total Arrecadado'] = df['quantidade'] * df['valor_unitario']
-            
-            # Ordenar para o Ranking (Maior para Menor)
             df_ranking = df.sort_values(by='Total Arrecadado', ascending=False)
             
-            # Exibir Tabela Editável
             st.subheader("📝 Editar Quantidades e Valores")
             st.caption("Edite diretamente na tabela abaixo para atualizar vendas.")
             
@@ -317,23 +308,16 @@ def main():
                     "nome_desbravador": "Desbravador",
                     "quantidade": st.column_config.NumberColumn("Qtd Pizzas", min_value=0),
                     "valor_unitario": st.column_config.NumberColumn("Valor Unit. (R$)", min_value=0.0),
-                    "Total Arrecadado": st.column_config.NumberColumn("Total (R$)", disabled=True), # Calculado automaticamente pelo pandas antes, mas aqui é estático na edição
+                    "Total Arrecadado": st.column_config.NumberColumn("Total (R$)", disabled=True),
                 },
                 hide_index=True,
                 use_container_width=True
             )
             
-            # Recalcular totais do DF editado para salvar corretamente
-            # Nota: O data_editor não recalcula colunas derivadas automaticamente no backend
-            # Precisamos garantir que o save use os dados brutos
-            
             if st.button("💾 Atualizar Vendas"):
-                # Antes de salvar, garantimos que a lógica de total seja consistente se necessário
-                # Mas como salvamos qtd e valor, o total é derivado.
                 save_pizza_df(edited_df)
                 st.rerun()
-
-            # Área de Exclusão
+            
             st.divider()
             st.subheader("🗑️ Excluir Registro")
             id_excluir_pizza = st.number_input("ID para excluir venda", min_value=1, step=1, key="pizza_del")
@@ -341,7 +325,6 @@ def main():
                 delete_record('vendas_pizza', id_excluir_pizza)
                 st.rerun()
             
-            # Exportação
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Baixar Ranking Pizzas (CSV)", csv, "ranking_pizzas.csv", "text/csv")
 
